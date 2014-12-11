@@ -3,6 +3,7 @@ import bioformats
 import glob
 import argparse
 import numpy as np
+import os
 import sys
 import vtk
 from vtk.util.vtkImageExportToArray import vtkImageExportToArray
@@ -447,6 +448,12 @@ class Q3DFrame(wx.Frame):
         self.blueContour.Layout()
         self.Layout()
         self.SetAutoLayout(True)
+        if hasattr(sys, 'frozen'):
+            self.icon = wx.IconFromLocation(
+                wx.IconLocation(sys.executable))
+        else:
+            self.icon = wx.Icon('q3dstack.ico', wx.BITMAP_TYPE_ICO)
+        self.SetIcon(self.icon)
         self.redContour.SetAutoLayout(True)
         self.greenContour.SetAutoLayout(True)
         self.blueContour.SetAutoLayout(True)
@@ -530,15 +537,32 @@ class Q3DFrame(wx.Frame):
                 style = wx.ID_OK | wx.ICON_INFORMATION)
     
 def main(args):
-    javabridge.start_vm(class_path=bioformats.JARS)
+    if hasattr(sys, 'frozen'):
+        jar_path = os.path.join(os.path.dirname(sys.executable), "jars")
+        jars = [os.path.join(jar_path, os.path.split(jar)[1])
+                for jar in bioformats.JARS]
+    else:
+        jars = bioformats.JARS
+    javabridge.start_vm(class_path=jars)
     try:
         filenames = sum(map(glob.glob, sys.argv[1:]), [])
+        app = wx.PySimpleApp()
+        if len(filenames) == 0:
+            with wx.FileDialog(
+                None,
+                "Pick files for z-stack",
+                wildcard="Tiff files (*.tif)|*.tif|All files (*.*)|*.*",
+                style = wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE | wx.FD_OPEN) as dlg:
+                assert isinstance(dlg, wx.FileDialog)
+                if dlg.ShowModal() != wx.ID_OK:
+                    return
+                filenames = dlg.Paths
         planes = [bioformats.load_image(filename) for filename in filenames]
         img_red, img_green, img_blue = [
             np.dstack([plane[:, :, i] for plane in planes]) *255
             for i in range(3)]
-        app = wx.PySimpleApp()
         frame = Q3DFrame(img_red, img_green, img_blue, None)
+        frame.SetTitle("Q3DStack: %s" %filenames[0])
         app.MainLoop()
         
     finally:
