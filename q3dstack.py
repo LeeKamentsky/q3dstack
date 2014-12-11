@@ -496,13 +496,13 @@ class Q3DFrame(wx.Frame):
                 if idx == 0:
                     return
                 stats = []
-                progress.Update(20, "Calculating MUC1 total intensity")
+                progress.Update(20, "Calculating red total intensity")
                 x, y, z = np.where(redSegmentation == idx)
                 total_green = np.sum(self.imgGreen[x, y, z])
-                stats.append(("Total MUC1 intensity", total_green))
-                progress.Update(30, "Calculating MUC1 mean intensity")
+                stats.append(("Total red intensity", total_green))
+                progress.Update(30, "Calculating red mean intensity")
                 mean_green = float(total_green) / len(x)
-                stats.append(("Mean MUC1 intensity", mean_green))
+                stats.append(("Mean red intensity", mean_green))
                 if self.blueContour.enabled:
                     progress.Update(40, "Thresholding nucleii")
                     blueThreshold = self.blueContour.contour.get_threshold()
