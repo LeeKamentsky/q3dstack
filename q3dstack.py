@@ -435,15 +435,11 @@ class Q3DFrame(wx.Frame):
             pan.Bind(
                 wx.EVT_BUTTON, 
                 lambda e, xinc=xinc, yinc=yinc: self.on_pan(xinc, yinc))
-            
-        button_sizer.Add(pan, 1, wx.EXPAND)
-        self.canvas.camera.SetFocalPoint(imgRed.shape[2],
-                                         imgRed.shape[1] / 2,
-                                         imgRed.shape[0] / 2)
-        self.canvas.camera.SetPosition(imgRed.shape[0],
-                                       imgRed.shape[1] / 2,
-                                       imgRed.shape[0] / 2)
-        self.canvas.renderer.ResetCamera()
+        
+        reset =  wx.Button(self, label="Reset")
+        button_sizer.Add(reset, 1, wx.EXPAND)
+        reset.Bind(wx.EVT_BUTTON, self.set_camera_back_to_square_one)
+        self.set_camera_back_to_square_one()
         self.Bind(wx.EVT_SIZE, self.on_size)
         self.canvas.Bind(EVT_PICK, self.on_pick)
         self.redContour.Layout()
@@ -455,6 +451,17 @@ class Q3DFrame(wx.Frame):
         self.greenContour.SetAutoLayout(True)
         self.blueContour.SetAutoLayout(True)
         self.Show()
+        
+    def set_camera_back_to_square_one(self, event=None):
+        self.canvas.camera.SetFocalPoint(self.imgRed.shape[2],
+                                         self.imgRed.shape[1] / 2,
+                                         self.imgRed.shape[0] / 2)
+        self.canvas.camera.SetPosition(self.imgRed.shape[0],
+                                       self.imgRed.shape[1] / 2,
+                                       self.imgRed.shape[0] / 2)
+        self.canvas.renderer.ResetCamera()
+        if event is not None:
+            self.canvas.render_window.Render()
         
     def on_pan(self, x, y):
         normal = np.array(self.canvas.camera.GetViewPlaneNormal())
