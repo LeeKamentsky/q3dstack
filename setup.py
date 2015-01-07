@@ -52,6 +52,7 @@ class MSI(distutils.core.Command):
     def __compile_command(self):
         """Return the command to use to compile an .iss file
         """
+        key = None
         try:
             key = _winreg.OpenKey(_winreg.HKEY_CLASSES_ROOT, 
                                    "InnoSetupScriptFile\\shell\\Compile\\command")
@@ -75,7 +76,8 @@ try:
         data_files = data_files,
         options = {
             'py2exe': {
-                'excludes': ['pylab', 'Tkinter', 'Cython', 'IPython'],
+                'includes': ['scipy', 'scipy.special', 'scipy.special.*'],
+                'excludes': ['pylab', 'Tkinter', 'Cython', 'IPython', 'pywintypes'],
                 'dll_excludes': [
                     'jvm.dll', 'iphlpapi.dll', 'nsi.dll',
                     'winnsi.dll', 'msvcr90.dll', 'msvcm90.dll',

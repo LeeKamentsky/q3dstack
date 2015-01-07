@@ -260,6 +260,8 @@ class ContourPanel(wx.Panel):
         self.__label = label
         self.__color = color
         self.__canvas = canvas
+        # Use average of two different methods.
+        threshold = int(mct(img) + otsu(img)) / 2
         self.Sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.__checkbox = wx.CheckBox(self, label = label)
         self.Sizer.Add(self.__checkbox, 0, wx.EXPAND)
@@ -267,7 +269,7 @@ class ContourPanel(wx.Panel):
         self.Sizer.Add(
             wx.StaticText(self, label = "Threshold"), 0, wx.ALIGN_RIGHT)
         self.Sizer.AddSpacer(2)
-        self.__threshold = wx.SpinCtrl(self, min=0, max=255, initial=10)
+        self.__threshold = wx.SpinCtrl(self, min=0, max=255, initial=threshold)
         self.Sizer.Add(self.__threshold, 0, wx.EXPAND)
         self.Sizer.AddSpacer(2)
         self.Sizer.Add(
@@ -278,12 +280,12 @@ class ContourPanel(wx.Panel):
         self.Sizer.AddSpacer(2)
         self.Sizer.Add(
             wx.StaticText(self, label = "XYSmoothing"), 0, wx.ALIGN_RIGHT)
-        self.__xysmoothing = wx.SpinCtrl(self, min = 1, max=100, initial=1)
+        self.__xysmoothing = wx.SpinCtrl(self, min = 1, max=100, initial=4)
         self.Sizer.Add(self.__xysmoothing, 0, wx.EXPAND)
         self.Sizer.AddSpacer(2)
         self.Sizer.Add(
             wx.StaticText(self, label = "ZSmoothing"), 0, wx.ALIGN_RIGHT)
-        self.__zsmoothing = wx.SpinCtrl(self, min = 1, max=100, initial=1)
+        self.__zsmoothing = wx.SpinCtrl(self, min = 1, max=100, initial=2)
         self.Sizer.Add(self.__zsmoothing, 0, wx.EXPAND)
         self.Sizer.AddSpacer(2)
         for ctrl in self.__threshold, self.__opacity, self.__xysmoothing, self.__zsmoothing:
@@ -510,13 +512,36 @@ class Q3DFrame(wx.Frame):
                 if idx == 0:
                     return
                 stats = []
-                progress.Update(20, "Calculating red total intensity")
+                gmax = np.percentile(self.imgGreen, 99.99999)
+                rmax = np.percentile(self.imgRed, 99.99999)
+                stats.append(("Green normalization", gmax))
+                progress.Update(20, "Calculating green total intensity")
                 x, y, z = np.where(redSegmentation == idx)
-                total_green = np.sum(self.imgGreen[x, y, z])
-                stats.append(("Total red intensity", total_green))
-                progress.Update(30, "Calculating red mean intensity")
-                mean_green = float(total_green) / len(x)
-                stats.append(("Mean red intensity", mean_green))
+                green = self.imgGreen[x, y, z].astype(float) / gmax
+                red = self.imgRed[x, y, z].astype(float) / rmax
+                total_green = np.sum(green)
+                stats.append(("Total green intensity", total_green))
+                progress.Update(30, "Calculating green mean intensity")
+                mean_green = total_green / len(x)
+                mean_red = np.mean(red)
+                progress.Update(35, "Calculating intensity per z-plane")
+                stats.append(("Mean green intensity", mean_green))
+                zplanes = np.unique(z)
+                for zplane in zplanes:
+                    xz, yz = [t[z==zplane] for t in x, y]
+                    mean_z = float(np.sum(self.imgGreen[xz, yz, zplane])) /\
+                        len(xz) / gmax
+                    stats.append(("Mean green intensity (z=%d)" %zplane, 
+                                  mean_z))
+                norm_green = green - mean_green
+                norm_red = red - mean_red
+                pearson = np.sum(norm_green * norm_red) / \
+                    np.sqrt(np.sum(norm_green **2) * np.sum(norm_red**2))
+                stats.append(("Pearson's red/green correlation", pearson))
+                manders = np.sum(green * red) /\
+                    np.sqrt(np.sum(green*green) * np.sum(red*red))
+                stats.append(("Manders' red/green correlation", manders))
+                
                 if self.blueContour.enabled:
                     progress.Update(40, "Thresholding nucleii")
                     blueThreshold = self.blueContour.contour.get_threshold()
@@ -525,17 +550,71 @@ class Q3DFrame(wx.Frame):
                         blueThreshold==0)
                     progress.Update(60, "Calculating anisotropy")
                     mean_d = np.mean(d[x, y, z])
-                    sd_d = np.std(d[x, y, z])
+                    sd_d = np.std(d[x, y, z]) + np.finfo(np.float32).eps
                     anisotropy = np.mean(
                         self.imgGreen[x, y, z] * (d[x, y, z] - mean_d) / sd_d) / \
-                        mean_green
+                        gmax
                     stats.append(("Anisotropy", anisotropy))
             wx.MessageBox(
                 "\n".join(["%s: %f" %stat for stat in stats]),
                 caption = "Statistics for golgi # %d" %idx,
                 parent = self,
                 style = wx.ID_OK | wx.ICON_INFORMATION)
+
+def otsu(img):
+    bins = np.bincount(img.flatten().astype(int))
+    log_intensities = np.log(np.linspace(.5, .5+len(bins), num=len(bins)))
+    best_score = np.Inf
+    best_i = 0
+    for i in range(1, len(bins)-1):
+        variances = []
+        for l, b in ((log_intensities[:i], bins[:i]), 
+                     (log_intensities[i:], bins[i:])):
+            n_pixels = np.sum(b)
+            if n_pixels == 0:
+                break
+            m = np.sum(l * b) / n_pixels
+            variances.append(np.sum(b*(l - m)**2) / n_pixels)
+        if n_pixels == 0:
+            continue
+        score = variances[0] * i + variances[1] * (len(bins) - i)
+        if score < best_score:
+            best_i = i
+            best_score = score
+    return best_i
+
+def mct(img):
+    nm = np.prod(img.shape)
+    histogram = np.bincount(img.flatten().astype(int))
+    #
+    # Compute (j - mean) and (j - mean) **2
+    mean_value = np.mean(img)
+    diff = np.arange(len(histogram)) - mean_value
+    diff2 = diff * diff
+    ndiff = histogram * diff
+    ndiff2 = histogram * diff2
+    #
+    # This is the sum over all j of (j-mean)**2. It's a constant that could
+    # be factored out, but I follow the method and use it anyway.
+    #
+    sndiff2 = np.sum(ndiff2) 
+    #
+    # Compute the cumulative sum from i to m which is the cumsum at m
+    # minus the cumsum at i-1
+    cndiff = np.cumsum(ndiff)
+    numerator = np.hstack([[cndiff[-1]], cndiff[-1] - cndiff[:-1]])
+    #
+    # For the bottom, we need (Nm - Ni) * Ni / Nm
+    #
+    ni = nm - np.hstack([[0], np.cumsum(histogram[:-1])]) # number of pixels above i-1
+    denominator = np.sqrt(sndiff2 * (nm - ni) * ni / nm)
+    #
+    mct = numerator / (denominator + np.finfo(np.float32).eps)
+    mct[denominator == 0] = 0
+    my_bin = np.argmax(mct)-1
+    return my_bin
     
+        
 def main(args):
     if hasattr(sys, 'frozen'):
         jar_path = os.path.join(os.path.dirname(sys.executable), "jars")
@@ -561,7 +640,8 @@ def main(args):
         img_red, img_green, img_blue = [
             np.dstack([plane[:, :, i] for plane in planes]) *255
             for i in range(3)]
-        frame = Q3DFrame(img_red, img_green, img_blue, None)
+        frame = Q3DFrame(img_red, img_green, img_blue, None,
+                         size=(1024, 768))
         frame.SetTitle("Q3DStack: %s" %filenames[0])
         app.MainLoop()
         
